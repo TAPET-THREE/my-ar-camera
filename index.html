@@ -1,38 +1,275 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Camera with 2D Frame Overlay</title>
+  <title>2D Frame AR Camera</title>
   <style>
-    body, html {
+    * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+
+    body, html {
       width: 100%;
       height: 100%;
       overflow: hidden;
+      background-color: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
-    /* カメラ映像の上に重なる2Dフレーム */
-    .frame-overlay {
+    /* 1. 背景のWebcam動画表示エリア */
+    #webcam {
       position: absolute;
       top: 0;
       left: 0;
       width: 100vw;
       height: 100vh;
-      pointer-events: none; /* 下のカメラ操作・ボタン操作を邪魔しない */
+      object-fit: cover;
+      z-index: 1;
+    }
+
+    /* 2. 前面に固定する2Dフレーム画像 */
+    #frame-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain; /* フレーム画像を画面全体にフィット */
+      pointer-events: none; /* タッチ操作を通す */
+      z-index: 5;
+    }
+
+    /* 3. UIコントロールレイヤー */
+    .ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
       z-index: 10;
-      object-fit: contain; /* 画像の比率を保って画面一杯に表示 */
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 16px;
+      pointer-events: none;
+    }
+
+    .clickable {
+      pointer-events: auto;
+    }
+
+    /* ヘッダー UI */
+    .top-bar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-fullscreen {
+      background: rgba(0, 0, 0, 0.5);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      backdrop-filter: blur(4px);
+      cursor: pointer;
+    }
+
+    .sub-hint {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.8);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    }
+
+    /* ステータス表示 UI */
+    .status-msg {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 8px 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      color: #ff4757;
+      font-weight: bold;
+      backdrop-filter: blur(4px);
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #ff4757;
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(0.8); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    /* フッター UI */
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .preview-thumbnail {
+      width: 50px;
+      height: 50px;
+      border-radius: 8px;
+      border: 2px solid #fff;
+      background: rgba(0, 0, 0, 0.4);
+      background-size: cover;
+      background-position: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #ccc;
+      cursor: pointer;
+      overflow: hidden;
+    }
+
+    .shutter-btn {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      border: 4px solid #fff;
+      background: rgba(255, 255, 255, 0.3);
+      outline: none;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    .shutter-btn:active {
+      transform: scale(0.92);
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    /* 撮影・合成用の非表示Canvas */
+    #capture-canvas {
+      display: none;
     }
   </style>
 </head>
 <body>
 
-  <!-- 前面に固定表示する2Dフレーム画像 -->
-  <img src="pp262.png" class="frame-overlay" alt="Frame Overlay">
+  <!-- カメラ映像 -->
+  <video id="webcam" autoplay playsinline muted></video>
 
-  <!-- 背景で動くカメラ映像（AR.jsや通常のWebcam） -->
-  <!-- ここに通常のカメラ表示コードやAR.jsのa-sceneを配置します -->
+  <!-- 前面2Dフレーム画像 (表示したい画像ファイル名に書き換えてください) -->
+  <img id="frame-overlay" src="pp262.png" alt="2D Frame">
 
+  <!-- UIオーバーレイ -->
+  <div class="ui-layer">
+    <div class="top-bar">
+      <button class="btn-fullscreen clickable" id="fsBtn">ENTER FULLSCREEN</button>
+      <span class="sub-hint">FOR THE BEST EXPERIENCE</span>
+    </div>
+
+    <div class="status-msg" id="statusMsg">
+      <div class="pulse-dot"></div>
+      CAPTURING...
+    </div>
+
+    <div class="bottom-bar">
+      <!-- 撮影画像プレビュー表示枠 -->
+      <div class="preview-thumbnail clickable" id="previewBtn">
+        <span id="previewLabel">PREVIEW</span>
+      </div>
+
+      <!-- 撮影ボタン -->
+      <button class="shutter-btn clickable" id="shutterBtn"></button>
+    </div>
+  </div>
+
+  <!-- 画像合成用キャンバス -->
+  <canvas id="capture-canvas"></canvas>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const frameOverlay = document.getElementById('frame-overlay');
+    const shutterBtn = document.getElementById('shutterBtn');
+    const fsBtn = document.getElementById('fsBtn');
+    const statusMsg = document.getElementById('statusMsg');
+    const previewBtn = document.getElementById('previewBtn');
+    const previewLabel = document.getElementById('previewLabel');
+    const canvas = document.getElementById('capture-canvas');
+    let lastCapturedDataUrl = null;
+
+    // 1. カメラの起動処理
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }, // リアカメラを使用
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        alert('カメラの起動に失敗しました。アクセスを許可してください。');
+        console.error(err);
+      }
+    }
+
+    // 2. フルスクリーン切り替え
+    fsBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => console.log(err));
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    // 3. 写真撮影（カメラ映像 + 2Dフレームの合成）
+    shutterBtn.addEventListener('click', () => {
+      statusMsg.style.display = 'flex';
+
+      // Canvasのサイズを画面に合わせる
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+
+      // 背景のカメラ映像を描画
+      ctx.drawImage(video, 0, 0, width, height);
+
+      // 前面のフレームを描画
+      ctx.drawImage(frameOverlay, 0, 0, width, height);
+
+      // 画像データを生成してプレビューにセット
+      setTimeout(() => {
+        lastCapturedDataUrl = canvas.toDataURL('image/png');
+        previewBtn.style.backgroundImage = `url(${lastCapturedDataUrl})`;
+        previewLabel.style.display = 'none';
+        statusMsg.style.display = 'none';
+      }, 300);
+    });
+
+    // 4. プレビュー枠タップで画像を拡大表示・ダウンロード
+    previewBtn.addEventListener('click', () => {
+      if (lastCapturedDataUrl) {
+        const win = window.open();
+        win.document.write(`<img src="${lastCapturedDataUrl}" style="width:100vw; height:auto;"/>`);
+      }
+    });
+
+    // ページロード時にカメラを起動
+    window.addEventListener('load', initCamera);
+  </script>
 </body>
 </html>
