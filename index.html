@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>2D Frame AR Camera</title>
+  <title>2D Frame Camera</title>
   <style>
     * {
       box-sizing: border-box;
@@ -122,7 +122,7 @@
       height: 100vh;
       background: rgba(0, 0, 0, 0.9);
       z-index: 20;
-      display: none; /* 初期状態は非表示 */
+      display: none;
       flex-direction: column;
       align-items: center;
       justify-content: space-between;
@@ -131,7 +131,7 @@
 
     .modal-preview {
       width: 100%;
-      height: 80vh;
+      height: 78vh;
       object-fit: contain;
       border-radius: 8px;
     }
@@ -189,7 +189,6 @@
     </div>
 
     <div class="bottom-bar">
-      <!-- 撮影ボタン -->
       <button class="shutter-btn clickable" id="shutterBtn"></button>
     </div>
   </div>
@@ -218,6 +217,7 @@
     const retakeBtn = document.getElementById('retakeBtn');
     const saveBtn = document.getElementById('saveBtn');
     const canvas = document.getElementById('capture-canvas');
+    let lastCapturedBlob = null;
     let lastCapturedDataUrl = null;
 
     // 1. カメラの起動
@@ -256,11 +256,15 @@
       ctx.drawImage(video, 0, 0, width, height);
       ctx.drawImage(frameOverlay, 0, 0, width, height);
 
-      // 合成結果を取得して表示
+      // DataURL形式とBlob形式の両方を用意
       lastCapturedDataUrl = canvas.toDataURL('image/png');
       capturedImage.src = lastCapturedDataUrl;
 
-      // モーダルを表示、カメラUIを非表示
+      canvas.toBlob((blob) => {
+        lastCapturedBlob = blob;
+      }, 'image/png');
+
+      // モーダルを表示
       uiLayer.style.display = 'none';
       modalOverlay.style.display = 'flex';
     });
@@ -270,18 +274,47 @@
       modalOverlay.style.display = 'none';
       uiLayer.style.display = 'flex';
       lastCapturedDataUrl = null;
+      lastCapturedBlob = null;
     });
 
-    // 5. 「保存する」ボタンの動作
-    saveBtn.addEventListener('click', () => {
+    // 5. 「保存する」ボタンの動作（iOS/Android対応）
+    saveBtn.addEventListener('click', async () => {
       if (!lastCapturedDataUrl) return;
 
+      const fileName = `ar_photo_${Date.now()}.png`;
+
+      // パターンA: Web Share API が使える場合（スマホで直接写真ライブラリに保存・共有）
+      if (navigator.share && lastCapturedBlob) {
+        try {
+          const file = new File([lastCapturedBlob], fileName, { type: 'image/png' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'AR Photo',
+              text: '撮影した写真です'
+            });
+            return;
+          }
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            console.error('シェアエラー:', err);
+          }
+        }
+      }
+
+      // パターンB: PCブラウザ等で従来通りのダウンロードができる場合
       const link = document.createElement('a');
       link.href = lastCapturedDataUrl;
-      link.download = `ar_photo_${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      link.download = fileName;
+      
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      if (isIOS) {
+        alert('表示されている画像を長押しして「"写真"に追加」または「保存」を選択してください。');
+      } else {
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     });
 
     // ページロード時にカメラを起動
