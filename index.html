@@ -243,7 +243,7 @@
       }
     });
 
-    // 3. 写真撮影とモーダル表示
+    // 3. 写真撮影（アスペクト比維持で引き伸ばし防止）
     shutterBtn.addEventListener('click', () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
@@ -252,11 +252,33 @@
 
       const ctx = canvas.getContext('2d');
 
-      // 背景（カメラ映像）と前面（フレーム）を合成
-      ctx.drawImage(video, 0, 0, width, height);
+      // カメラ映像のアスペクト比補正計算
+      const vWidth = video.videoWidth || width;
+      const vHeight = video.videoHeight || height;
+      const videoAspect = vWidth / vHeight;
+      const canvasAspect = width / height;
+
+      let renderWidth, renderHeight, offsetX, offsetY;
+
+      if (videoAspect > canvasAspect) {
+        renderHeight = height;
+        renderWidth = height * videoAspect;
+        offsetX = (width - renderWidth) / 2;
+        offsetY = 0;
+      } else {
+        renderWidth = width;
+        renderHeight = width / videoAspect;
+        offsetX = 0;
+        offsetY = (height - renderHeight) / 2;
+      }
+
+      // 1. 背景のカメラ映像を描画（中央配置＆縦横比固定）
+      ctx.drawImage(video, offsetX, offsetY, renderWidth, renderHeight);
+
+      // 2. 前面のフレームを描画
       ctx.drawImage(frameOverlay, 0, 0, width, height);
 
-      // DataURL形式とBlob形式の両方を用意
+      // データの保存準備
       lastCapturedDataUrl = canvas.toDataURL('image/png');
       capturedImage.src = lastCapturedDataUrl;
 
@@ -264,7 +286,7 @@
         lastCapturedBlob = blob;
       }, 'image/png');
 
-      // モーダルを表示
+      // UIの切り替え
       uiLayer.style.display = 'none';
       modalOverlay.style.display = 'flex';
     });
@@ -283,7 +305,7 @@
 
       const fileName = `ar_photo_${Date.now()}.png`;
 
-      // パターンA: Web Share API が使える場合（スマホで直接写真ライブラリに保存・共有）
+      // Web Share API（スマホ標準の保存・共有ダイアログ）
       if (navigator.share && lastCapturedBlob) {
         try {
           const file = new File([lastCapturedBlob], fileName, { type: 'image/png' });
@@ -302,7 +324,7 @@
         }
       }
 
-      // パターンB: PCブラウザ等で従来通りのダウンロードができる場合
+      // 通常ダウンロード／iOSフォールバック処理
       const link = document.createElement('a');
       link.href = lastCapturedDataUrl;
       link.download = fileName;
