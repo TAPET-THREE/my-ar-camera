@@ -37,8 +37,8 @@
       left: 0;
       width: 100vw;
       height: 100vh;
-      object-fit: contain; /* フレーム画像を画面全体にフィット */
-      pointer-events: none; /* タッチ操作を通す */
+      object-fit: contain;
+      pointer-events: none;
       z-index: 5;
     }
 
@@ -89,58 +89,12 @@
       text-shadow: 0 1px 2px rgba(0,0,0,0.8);
     }
 
-    /* ステータス表示 UI */
-    .status-msg {
-      display: none;
-      align-items: center;
-      gap: 8px;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 8px 16px;
-      border-radius: 12px;
-      font-size: 13px;
-      color: #ff4757;
-      font-weight: bold;
-      backdrop-filter: blur(4px);
-    }
-
-    .pulse-dot {
-      width: 8px;
-      height: 8px;
-      background-color: #ff4757;
-      border-radius: 50%;
-      animation: pulse 1s infinite;
-    }
-
-    @keyframes pulse {
-      0% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.3; transform: scale(0.8); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-
     /* フッター UI */
     .bottom-bar {
       display: flex;
       align-items: center;
-      justify-content: space-around;
-      width: 100%;
-      max-width: 360px;
-    }
-
-    .preview-thumbnail {
-      width: 50px;
-      height: 50px;
-      border-radius: 8px;
-      border: 2px solid #fff;
-      background: rgba(0, 0, 0, 0.4);
-      background-size: cover;
-      background-position: center;
-      display: flex;
-      align-items: center;
       justify-content: center;
-      font-size: 10px;
-      color: #ccc;
-      cursor: pointer;
-      overflow: hidden;
+      width: 100%;
     }
 
     .shutter-btn {
@@ -159,7 +113,61 @@
       background: rgba(255, 255, 255, 0.6);
     }
 
-    /* 撮影・合成用の非表示Canvas */
+    /* 4. 撮影後確認用モーダルオーバーレイ */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 20;
+      display: none; /* 初期状態は非表示 */
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 16px;
+    }
+
+    .modal-preview {
+      width: 100%;
+      height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 16px;
+      width: 100%;
+      max-width: 360px;
+      justify-content: center;
+    }
+
+    .btn-action {
+      flex: 1;
+      padding: 14px 0;
+      border-radius: 30px;
+      border: none;
+      font-size: 14px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    .btn-retake {
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+    }
+
+    .btn-save {
+      background: #007aff;
+      color: #fff;
+    }
+
+    /* 撮影合成用Canvas */
     #capture-canvas {
       display: none;
     }
@@ -170,29 +178,29 @@
   <!-- カメラ映像 -->
   <video id="webcam" autoplay playsinline muted></video>
 
-  <!-- 前面2Dフレーム画像 (表示したい画像ファイル名に書き換えてください) -->
+  <!-- 前面2Dフレーム画像 -->
   <img id="frame-overlay" src="ARフレーム1.png" alt="2D Frame">
 
-  <!-- UIオーバーレイ -->
-  <div class="ui-layer">
+  <!-- カメラ機能用 UI -->
+  <div class="ui-layer" id="uiLayer">
     <div class="top-bar">
       <button class="btn-fullscreen clickable" id="fsBtn">ENTER FULLSCREEN</button>
       <span class="sub-hint">FOR THE BEST EXPERIENCE</span>
     </div>
 
-    <div class="status-msg" id="statusMsg">
-      <div class="pulse-dot"></div>
-      CAPTURING...
-    </div>
-
     <div class="bottom-bar">
-      <!-- 撮影画像プレビュー表示枠 -->
-      <div class="preview-thumbnail clickable" id="previewBtn">
-        <span id="previewLabel">PREVIEW</span>
-      </div>
-
       <!-- 撮影ボタン -->
       <button class="shutter-btn clickable" id="shutterBtn"></button>
+    </div>
+  </div>
+
+  <!-- 撮影後の確認モーダル -->
+  <div class="modal-overlay" id="modalOverlay">
+    <img id="capturedImage" class="modal-preview" alt="Captured Preview">
+    
+    <div class="modal-actions">
+      <button class="btn-action btn-retake" id="retakeBtn">再撮影</button>
+      <button class="btn-action btn-save" id="saveBtn">保存する</button>
     </div>
   </div>
 
@@ -204,17 +212,19 @@
     const frameOverlay = document.getElementById('frame-overlay');
     const shutterBtn = document.getElementById('shutterBtn');
     const fsBtn = document.getElementById('fsBtn');
-    const statusMsg = document.getElementById('statusMsg');
-    const previewBtn = document.getElementById('previewBtn');
-    const previewLabel = document.getElementById('previewLabel');
+    const uiLayer = document.getElementById('uiLayer');
+    const modalOverlay = document.getElementById('modalOverlay');
+    const capturedImage = document.getElementById('capturedImage');
+    const retakeBtn = document.getElementById('retakeBtn');
+    const saveBtn = document.getElementById('saveBtn');
     const canvas = document.getElementById('capture-canvas');
     let lastCapturedDataUrl = null;
 
-    // 1. カメラの起動処理
+    // 1. カメラの起動
     async function initCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }, // リアカメラを使用
+          video: { facingMode: 'environment' },
           audio: false
         });
         video.srcObject = stream;
@@ -233,11 +243,8 @@
       }
     });
 
-    // 3. 写真撮影（カメラ映像 + 2Dフレームの合成）
+    // 3. 写真撮影とモーダル表示
     shutterBtn.addEventListener('click', () => {
-      statusMsg.style.display = 'flex';
-
-      // Canvasのサイズを画面に合わせる
       const width = window.innerWidth;
       const height = window.innerHeight;
       canvas.width = width;
@@ -245,27 +252,36 @@
 
       const ctx = canvas.getContext('2d');
 
-      // 背景のカメラ映像を描画
+      // 背景（カメラ映像）と前面（フレーム）を合成
       ctx.drawImage(video, 0, 0, width, height);
-
-      // 前面のフレームを描画
       ctx.drawImage(frameOverlay, 0, 0, width, height);
 
-      // 画像データを生成してプレビューにセット
-      setTimeout(() => {
-        lastCapturedDataUrl = canvas.toDataURL('image/png');
-        previewBtn.style.backgroundImage = `url(${lastCapturedDataUrl})`;
-        previewLabel.style.display = 'none';
-        statusMsg.style.display = 'none';
-      }, 300);
+      // 合成結果を取得して表示
+      lastCapturedDataUrl = canvas.toDataURL('image/png');
+      capturedImage.src = lastCapturedDataUrl;
+
+      // モーダルを表示、カメラUIを非表示
+      uiLayer.style.display = 'none';
+      modalOverlay.style.display = 'flex';
     });
 
-    // 4. プレビュー枠タップで画像を拡大表示・ダウンロード
-    previewBtn.addEventListener('click', () => {
-      if (lastCapturedDataUrl) {
-        const win = window.open();
-        win.document.write(`<img src="${lastCapturedDataUrl}" style="width:100vw; height:auto;"/>`);
-      }
+    // 4. 「再撮影」ボタンの動作
+    retakeBtn.addEventListener('click', () => {
+      modalOverlay.style.display = 'none';
+      uiLayer.style.display = 'flex';
+      lastCapturedDataUrl = null;
+    });
+
+    // 5. 「保存する」ボタンの動作
+    saveBtn.addEventListener('click', () => {
+      if (!lastCapturedDataUrl) return;
+
+      const link = document.createElement('a');
+      link.href = lastCapturedDataUrl;
+      link.download = `ar_photo_${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     });
 
     // ページロード時にカメラを起動
